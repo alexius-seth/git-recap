@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "git-recap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local Git activity scanner and daily standup summarizer"
 requires-python = ">=3.10"
 dependencies = [
     "typer>=0.12.0",
     "rich>=13.7.0",
+    "pyperclip>=1.8.2",
 ]
 
 [project.scripts]

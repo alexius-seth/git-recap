@@ -7,7 +7,7 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+.pytest_cache/ggit 
 .ruff_cache/
 .mypy_cache/
 
