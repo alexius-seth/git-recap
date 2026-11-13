@@ -4,12 +4,32 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from git_recap.git_ops import RepoActivity, get_repo_activity
+from git_recap.git_ops import CommitInfo, RepoActivity, get_repo_activity
 from git_recap.scanner import find_git_repos
-from git_recap.summarizer import filter_and_format_commits, render_markdown
+from git_recap.summarizer import (
+    append_to_log_file,
+    filter_and_format_commits,
+    format_timeframe_label,
+    group_commits_by_date,
+    render_markdown,
+)
 
 app = typer.Typer(help="Scan local Git repositories and summarize recent activity.")
 console = Console()
+
+
+def _print_commit_line(commit: CommitInfo, indent: str, show_stats: bool) -> None:
+    """Render a single commit line in the terminal with optional branch and diff stats."""
+    line = f"{indent}[dim]{commit.short_hash}[/dim] {commit.message}"
+    if show_stats:
+        if commit.branch_ref:
+            line += f" [magenta][{commit.branch_ref}][/magenta]"
+        if commit.files_changed > 0 or commit.insertions > 0 or commit.deletions > 0:
+            line += (
+                f" [dim]({commit.files_changed}f, "
+                f"[green]+{commit.insertions}[/green] / [red]-{commit.deletions}[/red])[/dim]"
+            )
+    console.print(line)
 
 
 @app.command()
@@ -18,11 +38,23 @@ def main(
         None,
         help="One or more directories to scan (defaults to current folder).",
     ),
-    hours: int = typer.Option(
-        24,
+    hours: int | None = typer.Option(
+        None,
         "--hours",
         "-h",
         help="Look back this many hours for commits.",
+    ),
+    days: int | None = typer.Option(
+        None,
+        "--days",
+        "-d",
+        help="Look back this many days for commits (e.g., --days 3).",
+    ),
+    weeks: int | None = typer.Option(
+        None,
+        "--weeks",
+        "-w",
+        help="Look back this many weeks for commits (e.g., --weeks 2).",
     ),
     all_authors: bool = typer.Option(
         False,
@@ -45,14 +77,41 @@ def main(
         "--raw",
         help="Disable noise filtering and show every commit verbatim.",
     ),
+    stats: bool = typer.Option(
+        False,
+        "--stats",
+        "-s",
+        help="Show branch labels and diff stats (+insertions / -deletions) per commit.",
+    ),
     copy: bool = typer.Option(
         False,
         "--copy",
         "-c",
         help="Copy the formatted Markdown summary to your clipboard.",
     ),
+    save: bool = typer.Option(
+        False,
+        "--save",
+        help="Append the Markdown summary to a daily recap-log.md journal file.",
+    ),
+    log_file: Path = typer.Option(
+        Path("recap-log.md"),
+        "--log-file",
+        help="Destination path for --save (defaults to ./recap-log.md).",
+    ),
 ) -> None:
     """Summarize your local Git activity."""
+    if weeks is not None:
+        total_hours = weeks * 168
+    elif days is not None:
+        total_hours = days * 24
+    elif hours is not None:
+        total_hours = hours
+    else:
+        total_hours = 24
+
+    timeframe = format_timeframe_label(total_hours)
+    multi_day = total_hours > 24
     target_paths = paths if paths else [Path.cwd()]
 
     discovered_repos: list[Path] = []
@@ -70,7 +129,7 @@ def main(
 
     activities: list[RepoActivity] = []
     for repo in discovered_repos:
-        activity = get_repo_activity(repo, hours=hours, all_authors=all_authors)
+        activity = get_repo_activity(repo, hours=total_hours, all_authors=all_authors)
         if not activity:
             continue
 
@@ -87,14 +146,14 @@ def main(
 
     if not activities:
         console.print(
-            f"[dim]No Git activity found in the last {hours} hours across {len(discovered_repos)} repo(s).[/dim]"
+            f"[dim]No Git activity found in the last {timeframe} across {len(discovered_repos)} repo(s).[/dim]"
         )
         raise typer.Exit(code=0)
 
     repo_label = "repo" if len(activities) == 1 else "repos"
     console.print(
         Panel.fit(
-            f"[bold cyan]Git Recap[/bold cyan] — Last {hours} hours ({len(activities)} active {repo_label})",
+            f"[bold cyan]Git Recap[/bold cyan] — Last {timeframe} ({len(activities)} active {repo_label})",
             border_style="cyan",
         )
     )
@@ -102,19 +161,31 @@ def main(
     for item in activities:
         console.print(f"\n[bold green]● {item.repo_name}[/bold green] [dim]({item.repo_path})[/dim]")
 
-        for commit in item.commits:
-            console.print(f"  [dim]{commit.short_hash}[/dim] {commit.message}")
+        if multi_day and item.commits:
+            for date_str, day_commits in group_commits_by_date(item.commits).items():
+                console.print(f"  [bold cyan]{date_str}[/bold cyan]")
+                for commit in day_commits:
+                    _print_commit_line(commit, indent="    ", show_stats=stats)
+        else:
+            for commit in item.commits:
+                _print_commit_line(commit, indent="  ", show_stats=stats)
 
         if item.uncommitted_count > 0:
             console.print(
                 f"  [yellow]↳ {item.uncommitted_count} uncommitted file(s) in working tree[/yellow]"
             )
 
+    markdown_text = render_markdown(activities, hours=total_hours, show_stats=stats) if (copy or save) else ""
+
     if copy:
-        markdown_text = render_markdown(activities, hours=hours)
         pyperclip.copy(markdown_text)
         console.print("\n[bold green]✓ Copied Markdown summary to clipboard.[/bold green]")
-    else:
+
+    if save:
+        saved_path = append_to_log_file(markdown_text, log_path=log_file)
+        console.print(f"[bold green]✓ Saved recap entry to {saved_path}[/bold green]")
+
+    if not copy and not save:
         console.print()
 
 
