@@ -132,6 +132,9 @@ def render_markdown(activities: list[RepoActivity], hours: int, show_stats: bool
 def append_to_log_file(markdown_text: str, log_path: Path) -> Path:
     """Append a dated recap entry to a Markdown work journal file."""
     resolved_path = log_path.expanduser().resolve()
+    if resolved_path.is_dir():
+        resolved_path = resolved_path / "recap-log.md"
+
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")

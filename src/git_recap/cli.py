@@ -3,6 +3,8 @@ import pyperclip
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.markup import escape
+
 
 from git_recap.git_ops import CommitInfo, RepoActivity, get_repo_activity
 from git_recap.scanner import find_git_repos
@@ -15,15 +17,16 @@ from git_recap.summarizer import (
 )
 
 app = typer.Typer(help="Scan local Git repositories and summarize recent activity.")
-console = Console()
+console = Console(highlight=False)
 
 
 def _print_commit_line(commit: CommitInfo, indent: str, show_stats: bool) -> None:
     """Render a single commit line in the terminal with optional branch and diff stats."""
-    line = f"{indent}[dim]{commit.short_hash}[/dim] {commit.message}"
+    safe_message = escape(commit.message)
+    line = f"{indent}[dim]{commit.short_hash}[/dim] {safe_message}"
     if show_stats:
         if commit.branch_ref:
-            line += f" [magenta][{commit.branch_ref}][/magenta]"
+            line += f" [magenta]\\[{escape(commit.branch_ref)}][/magenta]"
         if commit.files_changed > 0 or commit.insertions > 0 or commit.deletions > 0:
             line += (
                 f" [dim]({commit.files_changed}f, "
@@ -92,12 +95,12 @@ def main(
     save: bool = typer.Option(
         False,
         "--save",
-        help="Append the Markdown summary to a daily recap-log.md journal file.",
+        help="Append the Markdown summary to ./recap-log.md.",
     ),
-    log_file: Path = typer.Option(
-        Path("recap-log.md"),
+    log_file: Path | None = typer.Option(
+        None,
         "--log-file",
-        help="Destination path for --save (defaults to ./recap-log.md).",
+        help="Save summary to a custom Markdown file path (implies --save).",
     ),
 ) -> None:
     """Summarize your local Git activity."""
@@ -175,17 +178,19 @@ def main(
                 f"  [yellow]↳ {item.uncommitted_count} uncommitted file(s) in working tree[/yellow]"
             )
 
-    markdown_text = render_markdown(activities, hours=total_hours, show_stats=stats) if (copy or save) else ""
+    should_save = save or (log_file is not None)
+    markdown_text = render_markdown(activities, hours=total_hours, show_stats=stats) if (copy or should_save) else ""
 
     if copy:
         pyperclip.copy(markdown_text)
         console.print("\n[bold green]✓ Copied Markdown summary to clipboard.[/bold green]")
 
-    if save:
-        saved_path = append_to_log_file(markdown_text, log_path=log_file)
+    if should_save:
+        destination = log_file if log_file is not None else Path("recap-log.md")
+        saved_path = append_to_log_file(markdown_text, log_path=destination)
         console.print(f"[bold green]✓ Saved recap entry to {saved_path}[/bold green]")
 
-    if not copy and not save:
+    if not copy and not should_save:
         console.print()
 
 

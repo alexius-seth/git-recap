@@ -54,8 +54,8 @@ def test_summarizer_filters_noise_and_cleans_prefixes(tmp_path: Path) -> None:
     repo = tmp_path / "cleanup-repo"
     _init_temp_repo(repo)
 
-    for msg in ["wip", "fix: resolve login bug", "fix: resolve login bug"]:
-        (repo / "a.txt").write_text(msg, encoding="utf-8")
+    for idx, msg in enumerate(["wip", "fix: resolve login bug", "fix: resolve login bug"]):
+        (repo / "a.txt").write_text(f"{idx}: {msg}", encoding="utf-8")
         subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-m", msg], cwd=repo, check=True, capture_output=True)
 
